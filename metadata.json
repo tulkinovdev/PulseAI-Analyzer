@@ -1,0 +1,6 @@
+{
+  "name": "AI Website Performance Analyzer",
+  "description": "An elite-level, single-page web performance analysis platform with animated metrics, Core Web Vitals, and actionable AI optimizations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
