@@ -20,7 +20,7 @@ import { PerformanceReport, DualDeviceReport } from "./types";
 import { i18n, Language } from "./i18n";
 
 export default function App() {
-  const [lang, setLang] = useState<Language>('uzb');
+  const [lang, setLang] = useState<Language>('eng');
   const [url, setUrl] = useState("");
   const [isDark, setIsDark] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -244,7 +244,7 @@ export default function App() {
                         id="analyzer-submit-button"
                         type="submit"
                         disabled={!url.trim()}
-                        className="h-full flex items-center gap-1.5 rounded-lg bg-[#111111] px-4 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-97 disabled:scale-100 disabled:opacity-45 dark:bg-white dark:text-[#111111] dark:hover:bg-slate-150 whitespace-nowrap"
+                        className="h-full flex items-center gap-1.5 rounded-lg bg-[#111111] px-4 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-97 disabled:scale-100 disabled:opacity-45 dark:bg-white dark:text-[#111111] dark:hover:bg-slate-150 whitespace-nowrap cursor-pointer disabled:cursor-not-allowed"
                       >
                         <span>{t.analyzeBtn}</span>
                         <ArrowRight className="h-3 w-3" />
