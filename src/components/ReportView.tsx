@@ -52,6 +52,85 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
 
   const t = i18n[lang];
 
+  const getNormalizedRatingCategory = (rating: any): 'good' | 'needs-improvement' | 'poor' => {
+    const norm = String(rating || 'good').toLowerCase().replace(/[-_]/g, ' ').trim();
+    if (
+      norm.includes('yomon') || 
+      norm.includes('poor') || 
+      norm.includes('bad') || 
+      norm.includes('плох')
+    ) {
+      return 'poor';
+    }
+    if (
+      norm.includes('o\'rtach') || 
+      norm.includes('ortach') || 
+      norm.includes('need') || 
+      norm.includes('warn') || 
+      norm.includes('averag') || 
+      norm.includes('средн') || 
+      norm.includes('улучш') ||
+      norm.includes('improvement')
+    ) {
+      return 'needs-improvement';
+    }
+    return 'good';
+  };
+
+  const getLocalizedRating = (rating: any, currentLang: Language) => {
+    const category = getNormalizedRatingCategory(rating);
+    if (currentLang === 'uzb') {
+      if (category === 'good') return 'Yaxshi';
+      if (category === 'needs-improvement') return 'O\'rtacha';
+      return 'Yomon';
+    } else if (currentLang === 'rus') {
+      if (category === 'good') return 'Хорошо';
+      if (category === 'needs-improvement') return 'Требует улучшения';
+      return 'Плохо';
+    } else {
+      if (category === 'good') return 'Good';
+      if (category === 'needs-improvement') return 'Needs Improvement';
+      return 'Poor';
+    }
+  };
+
+  const getLocalizedImpact = (impact: string, currentLang: Language) => {
+    const norm = String(impact || '').toLowerCase().trim();
+    if (norm === 'high' || norm.includes('yuqori') || norm.includes('высок')) {
+      return currentLang === 'uzb' ? "Yuqori" : currentLang === 'rus' ? "Высокое" : "High";
+    }
+    if (norm === 'medium' || norm.includes('o\'rtach') || norm.includes('средн')) {
+      return currentLang === 'uzb' ? "O'rtacha" : currentLang === 'rus' ? "Среднее" : "Medium";
+    }
+    return currentLang === 'uzb' ? "Past" : currentLang === 'rus' ? "Низкое" : "Low";
+  };
+
+  const getLocalizedSavings = (savings: string, currentLang: Language) => {
+    const norm = String(savings || '').toLowerCase().trim();
+    if (norm.includes('security standard')) {
+      return currentLang === 'uzb' ? "Xavfsizlik Standarti" : currentLang === 'rus' ? "Стандарт безопасности" : "Security Standard";
+    }
+    if (norm.includes('security secure')) {
+      return currentLang === 'uzb' ? "Xavfsiz Himoyalangan" : currentLang === 'rus' ? "Безопасность подтверждена" : "Security Secure";
+    }
+    if (norm.includes('seo rating boosted')) {
+      return currentLang === 'uzb' ? "SEO Yaxshilandi" : currentLang === 'rus' ? "SEO Улучшено" : "SEO Rating Boosted";
+    }
+    if (norm.includes('seo optimized')) {
+      return currentLang === 'uzb' ? "SEO Optimallashgan" : currentLang === 'rus' ? "SEO Оптимизировано" : "SEO Optimized";
+    }
+    
+    // For ms / KB times:
+    const cleanSavings = savings.replace(/est\.?/gi, '').trim();
+    if (currentLang === 'uzb') {
+      return `~${cleanSavings} tejaladi`;
+    } else if (currentLang === 'rus') {
+      return `~${cleanSavings} сэкономлено`;
+    } else {
+      return `${cleanSavings} Est.`;
+    }
+  };
+
   // Real-time translation helper for known static strings generated in demo/default audits
   const translateDynamicText = (text: string) => {
     if (!text) return "";
@@ -84,10 +163,69 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
 
   // Real-time opportunity localizer dictionary mapping
   const localizeOpportunity = (opp: Opportunities) => {
-    const title = String(opp.title || "").toLowerCase();
-    const desc = String(opp.description || "").toLowerCase();
-    const why = String(opp.whyItMatters || "").toLowerCase();
-    const id = String(opp.id || "").toLowerCase();
+    const originalTitle = String(opp.title || "").toLowerCase();
+    const originalDesc = String(opp.description || "").toLowerCase();
+    const originalWhy = String(opp.whyItMatters || "").toLowerCase();
+    const originalId = String(opp.id || "").toLowerCase();
+    const cat = String(opp.category || "").toLowerCase();
+
+    const hasTopic = (keywords: string[]) => {
+      return keywords.some(kw => 
+        originalTitle.includes(kw) || 
+        originalDesc.includes(kw) || 
+        originalWhy.includes(kw) || 
+        originalId.includes(kw) ||
+        cat.includes(kw)
+      );
+    };
+
+    const title = {
+      includes: (kw: string) => {
+        if (kw === "unused" || kw === "splitting" || kw === "defer" || kw === "script" || kw === "js") {
+          return hasTopic(["unused", "ishlatilmaydigan", "неиспользуемый", "splitting", "skript", "defer", "script", "js", "bundle"]);
+        }
+        if (kw === "image" || kw === "webp" || kw === "size") {
+          return hasTopic(["image", "webp", "avif", "rasm", "картин", "изображен", "lcp", "size"]);
+        }
+        if (kw === "alt") {
+          return hasTopic(["alt", "muqobil", "альтернативный", "описание"]);
+        }
+        if (kw === "contrast") {
+          return hasTopic(["contrast", "kontrast", "яркост", "color contrast"]);
+        }
+        if (kw === "aria" || kw === "semantic") {
+          return hasTopic(["aria", "semantic", "semantik", "семанти"]);
+        }
+        if (kw === "https" || kw === "csp" || kw === "security") {
+          return hasTopic(["https", "csp", "security", "xavfsiz", "безопасн"]);
+        }
+        if (kw === "inline" || kw === "style") {
+          return hasTopic(["inline", "style", "stillar", "стили", "встроенн"]);
+        }
+        if (kw === "meta" || kw === "seo" || kw === "description") {
+          return hasTopic(["meta", "seo", "tavsif", "описание", "заголовок"]);
+        }
+        if (kw === "robots" || kw === "sitemap") {
+          return hasTopic(["robots", "sitemap", "карта сайта"]);
+        }
+        if (kw === "canonical") {
+          return hasTopic(["canonical", "kanonik", "каноническ"]);
+        }
+        return originalTitle.includes(kw);
+      }
+    };
+
+    const desc = {
+      includes: (kw: string) => {
+        return title.includes(kw);
+      }
+    };
+
+    const id = {
+      includes: (kw: string) => {
+        return title.includes(kw);
+      }
+    };
 
     let res = {
       title: opp.title,
@@ -661,8 +799,8 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
                       </div>
                       <div className="flex items-center gap-1.5 text-xs mt-3.5">
                         <span className={`w-2 h-2 rounded-full ${meta.bullet}`} />
-                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] capitalize">
-                          {metric.rating === 'good' ? (t.optimalRange || "Optimal Range") : metric.rating.replace("-", " ")}
+                        <span className={`font-semibold text-[11px] capitalize ${meta.text}`}>
+                          {getLocalizedRating(metric.rating, lang)}
                         </span>
                       </div>
                     </div>
@@ -961,10 +1099,10 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`rounded-xl border px-2.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${getImpactColor(opp.impact as any)}`}>
-                        {opp.impact} Impact
+                        {getLocalizedImpact(opp.impact, lang)} {lang === 'uzb' ? "Ta'sir" : lang === 'rus' ? "Влияние" : "Impact"}
                       </span>
                       <span className="hidden rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-600 dark:bg-slate-850 dark:text-slate-300 sm:inline-block">
-                        -{opp.savings} Est.
+                        {getLocalizedSavings(opp.savings, lang)}
                       </span>
                     </div>
                   </button>
@@ -1001,7 +1139,13 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
                               {t.estimatedBenefit || "ESTIMATED SCORE BENEFIT"}
                             </span>
                             <span className="font-sans text-xs font-semibold text-slate-700 dark:text-slate-300 block mt-1">
-                              Up to <strong className="font-bold text-emerald-600 dark:text-emerald-400">+{opp.savings.includes("ms") ? "12%" : "9%"}</strong> {t.indexGain || "total index gain"}
+                              {lang === 'uzb' ? (
+                                <><strong className="font-bold text-emerald-600 dark:text-emerald-400">+{opp.savings.includes("ms") ? "12%" : "9%"} gacha</strong> {t.indexGain}</>
+                              ) : lang === 'rus' ? (
+                                <>До <strong className="font-bold text-emerald-600 dark:text-emerald-400">+{opp.savings.includes("ms") ? "12%" : "9%"}</strong> {t.indexGain}</>
+                              ) : (
+                                <>Up to <strong className="font-bold text-emerald-600 dark:text-emerald-400">+{opp.savings.includes("ms") ? "12%" : "9%"}</strong> {t.indexGain}</>
+                              )}
                             </span>
                           </div>
                         </div>
@@ -1067,7 +1211,7 @@ export function ReportView({ report, onReset, lang = 'uzb' }: ReportViewProps) {
           {t.newAuditAction || "Yangi Saytni Tahlil Qilishni Xohlaysizmi?"}
         </h3>
         <p className="mx-auto mt-2 max-w-md font-sans text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-light">
-          {t.newAuditDesc || "Bosh sahifaga qaytib istalgan boshqa sayt unumdorligini, Core Web Vitals ko'rsatkichlarini va Gemini AI aqlli tavsiyalarini tahlil qilishingiz mumkin."}
+          {t.newAuditDesc || "Bosh sahifaga qaytib istalgan boshqa sayt unumdorligini, Core Web Vitals ko'rsatkichlarini va aqlli tahlil tavsiyalarini tahlil qilishingiz mumkin."}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button

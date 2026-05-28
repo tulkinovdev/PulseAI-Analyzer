@@ -200,7 +200,7 @@ export default function App() {
                 
                 <h2 className="mt-4 font-display text-3xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-4xl md:text-5xl">
                   {lang === 'uzb' ? (
-                    <>Sayt holatini tekshiring.<br /><span className="text-emerald-500 font-extrabold pb-0.5">Mukammal</span> yechimlarni yarating.</>
+                    <>Sayt holatini tekshiring.<br />Eng <span className="text-emerald-500 font-extrabold pb-0.5">mukammal</span> yechimlar.</>
                   ) : lang === 'rus' ? (
                     <>Инспектируйте показатели.<br />Создавайте <span className="text-emerald-500 font-extrabold pb-0.5">элитные</span> решения.</>
                   ) : (
@@ -244,7 +244,7 @@ export default function App() {
                         id="analyzer-submit-button"
                         type="submit"
                         disabled={!url.trim()}
-                        className="h-full flex items-center gap-1.5 rounded-lg bg-[#111111] px-4 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-97 disabled:scale-100 disabled:opacity-45 dark:bg-white dark:text-[#111111] dark:hover:bg-slate-150 whitespace-nowrap cursor-pointer disabled:cursor-not-allowed"
+                        className="h-full flex items-center gap-1.5 rounded-lg bg-[#111111] px-4 text-xs font-semibold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-97 disabled:scale-100 disabled:opacity-45 dark:bg-white dark:text-[#111111] dark:hover:bg-slate-150 whitespace-nowrap"
                       >
                         <span>{t.analyzeBtn}</span>
                         <ArrowRight className="h-3 w-3" />
@@ -306,7 +306,7 @@ export default function App() {
               </div>
 
               {/* Clean Copyright 2026 Footnote replacing standard feature cards */}
-              <div className="mt-16 w-full max-w-xl text-center border-t border-slate-250/30 pt-8 dark:border-slate-800/40">
+              <div className="mt-16 w-full max-w-xl text-center border-t border-slate-200 pt-8 dark:border-slate-800">
                 <p className="font-mono text-[11px] font-semibold text-slate-400 dark:text-slate-550 tracking-wide">
                   {t.copyright}
                 </p>

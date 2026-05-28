@@ -1,6 +1,3 @@
-import express from "express";
-import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -11,183 +8,193 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY
 });
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export default async function handler(req: any, res: any) {
+  // Handle CORS
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
-  app.use(express.json());
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-  // API Route - Website Performance Scraper + PageSpeed Insights + Custom Smart Analysis
-  app.post("/api/analyze", async (req, res): Promise<any> => {
-    let { url, lang = "uzb" } = req.body;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
 
-    if (!url) {
-      return res.status(400).json({ error: "URL is required" });
-    }
+  let { url, lang = "uzb" } = req.body;
 
-    // Sanitize input URL
-    if (!/^https?:\/\//i.test(url)) {
-      url = "https://" + url;
-    }
+  if (!url) {
+    return res.status(400).json({ error: "URL is required" });
+  }
 
+  // Sanitize input URL
+  if (!/^https?:\/\//i.test(url)) {
+    url = "https://" + url;
+  }
+
+  try {
+    new URL(url); // Validate URL structure
+  } catch (e) {
+    return res.status(400).json({ error: "Invalid URL format" });
+  }
+
+  console.log(`Starting Vercel Serverless analysis for URL: ${url}`);
+
+  // Track scraped diagnostics
+  let metaTitle = "";
+  let metaDescription = "";
+  let htmlLength = 0;
+  let imagesCount = 0;
+  let scriptsCount = 0;
+  let stylesheetsCount = 0;
+  let inlineStylesCount = 0;
+  let missingAltCount = 0;
+  let serverResponseTime = 0;
+  let scrapStatus = "Scrape complete";
+  let scrapError = "";
+
+  const scrapePromise = (async () => {
     try {
-      new URL(url); // Validate URL structure
-    } catch (e) {
-      return res.status(400).json({ error: "Invalid URL format" });
-    }
-
-    console.log(`Starting real-world analysis for URL: ${url}`);
-
-    // Track scraped diagnostics
-    let metaTitle = "";
-    let metaDescription = "";
-    let htmlLength = 0;
-    let imagesCount = 0;
-    let scriptsCount = 0;
-    let stylesheetsCount = 0;
-    let inlineStylesCount = 0;
-    let missingAltCount = 0;
-    let serverResponseTime = 0;
-    let scrapStatus = "Scrape complete";
-    let scrapError = "";
-
-    const scrapePromise = (async () => {
-      try {
-        const startTime = Date.now();
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(6000) // 6 second timeout to ensure snappy user responses
-        });
-        serverResponseTime = Date.now() - startTime;
-
-        if (response.ok) {
-          const bodyText = await response.text();
-          htmlLength = bodyText.length;
-
-          // Extract metadata and DOM structure using Regex (fast & robust on servers)
-          const titleMatch = bodyText.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-          metaTitle = titleMatch ? titleMatch[1].trim() : "";
-
-          const descMatch = bodyText.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
-                            bodyText.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
-          metaDescription = descMatch ? descMatch[1].trim() : "";
-
-          const scriptTags = bodyText.match(/<script[^>]*>/gi) || [];
-          scriptsCount = scriptTags.length;
-
-          const imgTags = bodyText.match(/<img[^>]*>/gi) || [];
-          imagesCount = imgTags.length;
-
-          // Analyze alt attributes of images
-          imgTags.forEach(img => {
-            if (!/alt\s*=\s*["']/i.test(img) || /alt\s*=\s*["']\s*["']/i.test(img)) {
-              missingAltCount++;
-            }
-          });
-
-          const linkStyles = bodyText.match(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi) || [];
-          stylesheetsCount = linkStyles.length;
-
-          const inlineStyles = bodyText.match(/<style[^>]*>/gi) || [];
-          inlineStylesCount = inlineStyles.length;
-        } else {
-          scrapStatus = "Received non-2xx status code";
-          scrapError = `${response.status} ${response.statusText}`;
-        }
-      } catch (err: any) {
-        console.warn("Direct scraping failed/timed out, falling back to pure PageSpeed API or AI inference: ", err.message);
-        scrapStatus = "Direct scraping timed out/failed";
-        scrapError = err.message || String(err);
-      }
-    })();
-
-    // Try fetching PageSpeed Insights API, utilizing PAGESPEED_API_KEY if exists, falling back to keyless query
-    let psiData: any = null;
-    let psiFetchSuccess = false;
-    let psiErrorDetails = "";
-
-    const runPsiRequest = async (useKey: boolean, timeoutMs: number = 8000): Promise<any> => {
-      // Avoid passing GEMINI_API_KEY directly as it is restricted and triggers 403 Forbidden on different endpoints
-      const key = useKey ? process.env.PAGESPEED_API_KEY : null;
-      const keyParam = key ? `&key=${key}` : "";
-      const psiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&category=performance&category=accessibility&category=best-practices&category=seo${keyParam}`;
-      
-      const response = await fetch(psiUrl, {
-        signal: AbortSignal.timeout(timeoutMs) // Custom dynamic timeout
+      const startTime = Date.now();
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9"
+        },
+        signal: AbortSignal.timeout(6000) // 6 second timeout to ensure snappy user responses
       });
-      if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error(`PSI Fetch Response Status: 429 Too Many Requests. Google API limit exceeded for keyless access.`);
-        }
-        throw new Error(`PSI Fetch Response Status: ${response.status} ${response.statusText}`);
-      }
-      return await response.json();
-    };
+      serverResponseTime = Date.now() - startTime;
 
-    const psiPromise = (async () => {
-      try {
-        console.log(`Querying PageSpeed Insights API for real metrics...`);
-        const psiStartTime = Date.now();
-        
-        if (process.env.PAGESPEED_API_KEY) {
-          try {
-            psiData = await runPsiRequest(true, 8000); // 8s timeout for premium key-based run
-            psiFetchSuccess = true;
-            console.log(`PageSpeed Insights metrics fetched successfully with PAGESPEED_API_KEY in ${Date.now() - psiStartTime}ms`);
-          } catch (keyedError: any) {
-            const isTimeout = keyedError.name === "TimeoutError" || 
-                              keyedError.name === "AbortError" || 
-                              keyedError.message?.toLowerCase().includes("timeout") || 
-                              keyedError.message?.toLowerCase().includes("abort");
-            
-            if (isTimeout) {
-              console.warn(`PSI API with API key failed due to TIMEOUT: ${keyedError.message}. Skipping keyless retry to save time.`);
-              psiErrorDetails = `API query timed out after 8 seconds. ${keyedError.message}`;
-            } else {
-              console.warn(`PSI API with API key failed: ${keyedError.message}. Retrying keyless...`);
-              psiErrorDetails = keyedError.message;
-              try {
-                psiData = await runPsiRequest(false, 6000); // 6s timeout for keyless fallback
-                psiFetchSuccess = true;
-                console.log(`PageSpeed Insights metrics fetched successfully keyless in ${Date.now() - psiStartTime}ms`);
-              } catch (keylessError: any) {
-                console.warn(`PSI API keyless retry also failed: ${keylessError.message}`);
-                psiErrorDetails += ` | Keyless fallback failed: ${keylessError.message}`;
-              }
+      if (response.ok) {
+        const bodyText = await response.text();
+        htmlLength = bodyText.length;
+
+        // Extract metadata and DOM structure using Regex (fast & robust on servers)
+        const titleMatch = bodyText.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        metaTitle = titleMatch ? titleMatch[1].trim() : "";
+
+        const descMatch = bodyText.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
+                          bodyText.match(/<meta[^>]*content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
+        metaDescription = descMatch ? descMatch[1].trim() : "";
+
+        const scriptTags = bodyText.match(/<script[^>]*>/gi) || [];
+        scriptsCount = scriptTags.length;
+
+        const imgTags = bodyText.match(/<img[^>]*>/gi) || [];
+        imagesCount = imgTags.length;
+
+        // Analyze alt attributes of images
+        imgTags.forEach(img => {
+          if (!/alt\s*=\s*["']/i.test(img) || /alt\s*=\s*["']\s*["']/i.test(img)) {
+            missingAltCount++;
+          }
+        });
+
+        const linkStyles = bodyText.match(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi) || [];
+        stylesheetsCount = linkStyles.length;
+
+        const inlineStyles = bodyText.match(/<style[^>]*>/gi) || [];
+        inlineStylesCount = inlineStyles.length;
+      } else {
+        scrapStatus = "Received non-2xx status code";
+        scrapError = `${response.status} ${response.statusText}`;
+      }
+    } catch (err: any) {
+      console.warn("Direct scraping failed/timed out, falling back to pure PageSpeed API or AI inference: ", err.message);
+      scrapStatus = "Direct scraping timed out/failed";
+      scrapError = err.message || String(err);
+    }
+  })();
+
+  // Try fetching PageSpeed Insights API, utilizing PAGESPEED_API_KEY if exists, falling back to keyless query
+  let psiData: any = null;
+  let psiFetchSuccess = false;
+  let psiErrorDetails = "";
+
+  const runPsiRequest = async (useKey: boolean, timeoutMs: number = 8000): Promise<any> => {
+    const key = useKey ? process.env.PAGESPEED_API_KEY : null;
+    const keyParam = key ? `&key=${key}` : "";
+    const psiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&category=performance&category=accessibility&category=best-practices&category=seo${keyParam}`;
+    
+    const response = await fetch(psiUrl, {
+      signal: AbortSignal.timeout(timeoutMs) // Custom dynamic timeout
+    });
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error(`PSI Fetch Response Status: 429 Too Many Requests. Google API limit exceeded for keyless access.`);
+      }
+      throw new Error(`PSI Fetch Response Status: ${response.status} ${response.statusText}`);
+    }
+    return await response.json();
+  };
+
+  const psiPromise = (async () => {
+    try {
+      console.log(`Querying PageSpeed Insights API for real metrics...`);
+      const psiStartTime = Date.now();
+      
+      if (process.env.PAGESPEED_API_KEY) {
+        try {
+          psiData = await runPsiRequest(true, 8000); // 8s timeout for premium key-based run
+          psiFetchSuccess = true;
+          console.log(`PageSpeed Insights metrics fetched successfully with PAGESPEED_API_KEY in ${Date.now() - psiStartTime}ms`);
+        } catch (keyedError: any) {
+          const isTimeout = keyedError.name === "TimeoutError" || 
+                            keyedError.name === "AbortError" || 
+                            keyedError.message?.toLowerCase().includes("timeout") || 
+                            keyedError.message?.toLowerCase().includes("abort");
+          
+          if (isTimeout) {
+            console.warn(`PSI API with API key failed due to TIMEOUT: ${keyedError.message}. Skipping keyless retry to save time.`);
+            psiErrorDetails = `API query timed out after 8 seconds. ${keyedError.message}`;
+          } else {
+            console.warn(`PSI API with API key failed: ${keyedError.message}. Retrying keyless...`);
+            psiErrorDetails = keyedError.message;
+            try {
+              psiData = await runPsiRequest(false, 6000); // 6s timeout for keyless fallback
+              psiFetchSuccess = true;
+              console.log(`PageSpeed Insights metrics fetched successfully keyless in ${Date.now() - psiStartTime}ms`);
+            } catch (keylessError: any) {
+              console.warn(`PSI API keyless retry also failed: ${keylessError.message}`);
+              psiErrorDetails += ` | Keyless fallback failed: ${keylessError.message}`;
             }
           }
-        } else {
-          try {
-            psiData = await runPsiRequest(false, 8000); // 8s timeout for keyless-only run
-            psiFetchSuccess = true;
-            console.log(`PageSpeed Insights metrics fetched successfully keyless (no key specified) in ${Date.now() - psiStartTime}ms`);
-          } catch (keylessOnlyError: any) {
-            console.warn(`PSI API keyless direct query failed: ${keylessOnlyError.message}`);
-            psiErrorDetails = keylessOnlyError.message;
-          }
         }
-      } catch (e: any) {
-        console.warn("PageSpeed Insights API direct invocation failed or was skipped entirely:", e.message);
-        psiErrorDetails = e.message;
+      } else {
+        try {
+          psiData = await runPsiRequest(false, 8000); // 8s timeout for keyless-only run
+          psiFetchSuccess = true;
+          console.log(`PageSpeed Insights metrics fetched successfully keyless (no key specified) in ${Date.now() - psiStartTime}ms`);
+        } catch (keylessOnlyError: any) {
+          console.warn(`PSI API keyless direct query failed: ${keylessOnlyError.message}`);
+          psiErrorDetails = keylessOnlyError.message;
+        }
       }
-    })();
-
-    // Run scraper and PageSpeed Insights API request concurrently to prevent timeout/high delay
-    await Promise.allSettled([scrapePromise, psiPromise]);
-
-    // Build context-aware prompt explaining the page metrics for BOTH mobile and desktop profiles
-    let langInstruction = "Generate all human-readable text in English.";
-    if (lang === "uzb") {
-      langInstruction = `CRITICAL LANGUAGE REQUIREMENT: All human-readable text fields in the JSON response (such as values of "aiExecutiveSummary", "description", "whyItMatters", "title", "name" inside "metrics" and "opportunities" etc.) MUST be written in the UZBEK language (o'zbek tili). Technical terms (HTML, CSS, JS, URL, HTTPS, DNS, SVG, PNG, DOM, Node, etc.) can stay as-is, but all sentences, explanations, and titles must be fully translated/written in o'zbek tili. Example metrics names: 'Largest Contentful Paint (Eng yirik rasm yuklanishi)', 'Total Blocking Time (Umumiy to'silish vaqti)', etc. Must be natural, professional, and grammatically flawless o'zbekcha.`;
-    } else if (lang === "rus") {
-      langInstruction = `CRITICAL LANGUAGE REQUIREMENT: All human-readable text fields in the JSON response (such as values of "aiExecutiveSummary", "description", "whyItMatters", "title", "name" inside "metrics" and "opportunities" etc.) MUST be written in the RUSSIAN language (русский язык). Technical terms (HTML, CSS, JS, URL, HTTPS, DNS, SVG, PNG, DOM, Node, etc.) can stay as-is, but all sentences, explanations, and titles must be fully translated/written in русский язык. Example metrics names: 'Largest Contentful Paint (LCP)', etc. Must be natural, professional, and grammatically flawless русский язык.`;
+    } catch (e: any) {
+      console.warn("PageSpeed Insights API direct invocation failed or was skipped entirely:", e.message);
+      psiErrorDetails = e.message;
     }
+  })();
 
-    const prompt = `
+  // Run scraper and PageSpeed Insights API request concurrently to prevent timeout/high delay
+  await Promise.allSettled([scrapePromise, psiPromise]);
+
+  // Build context-aware prompt explaining the page metrics for BOTH mobile and desktop profiles
+  let langInstruction = "Generate all human-readable text in English.";
+  if (lang === "uzb") {
+    langInstruction = `CRITICAL LANGUAGE REQUIREMENT: All human-readable text fields in the JSON response (such as values of "aiExecutiveSummary", "description", "whyItMatters", "title", "name" inside "metrics" and "opportunities" etc.) MUST be written in the UZBEK language (o'zbek tili). Technical terms (HTML, CSS, JS, URL, HTTPS, DNS, SVG, PNG, DOM, Node, etc.) can stay as-is, but all sentences, explanations, and titles must be fully translated/written in o'zbek tili. Example metrics names: 'Largest Contentful Paint (Eng yirik rasm yuklanishi)', 'Total Blocking Time (Umumiy to'silish vaqti)', etc. Must be natural, professional, and grammatically flawless o'zbekcha.`;
+  } else if (lang === "rus") {
+    langInstruction = `CRITICAL LANGUAGE REQUIREMENT: All human-readable text fields in the JSON response (such as values of "aiExecutiveSummary", "description", "whyItMatters", "title", "name" inside "metrics" and "opportunities" etc.) MUST be written in the RUSSIAN language (русский язык). Technical terms (HTML, CSS, JS, URL, HTTPS, DNS, SVG, PNG, DOM, Node, etc.) can stay as-is, but all sentences, explanations, and titles must be fully translated/written in русский язык. Example metrics names: 'Largest Contentful Paint (LCP)', etc. Must be natural, professional, and grammatically flawless русский язык.`;
+  }
+
+  const prompt = `
 Generate two comprehensive website performance audit reports for the URL: "${url}" in a single structured JSON response: one for "mobile" and one for "desktop".
 
 --- LANGUAGE POLICY ---
@@ -237,145 +244,175 @@ Ensure you provide for BOTH layouts:
 Your output MUST be valid JSON matching the schema format completely, containing two keys: "mobile" and "desktop", each representing a valid performance report. Do NOT truncate or abbreviate definitions. Keep everything clean, premium, and fully actionable.
 `;
 
-    try {
-      const deviceReportSchema = {
-        type: Type.OBJECT,
-        properties: {
-          performanceScore: { type: Type.INTEGER, description: "Performance score out of 100" },
-          accessibilityScore: { type: Type.INTEGER, description: "Accessibility score out of 100" },
-          bestPracticesScore: { type: Type.INTEGER, description: "Best practices score out of 100" },
-          seoScore: { type: Type.INTEGER, description: "SEO score out of 100" },
-          metrics: {
-            type: Type.OBJECT,
-            properties: {
-              fcp: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              },
-              lcp: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              },
-              cls: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              },
-              tbt: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              },
-              speedIndex: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              },
-              interactive: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  description: { type: Type.STRING },
-                  rating: { type: Type.STRING },
-                },
-                required: ["id", "name", "value", "score", "description", "rating"]
-              }
-            },
-            required: ["fcp", "lcp", "cls", "tbt", "speedIndex", "interactive"]
-          },
-          resources: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                label: { type: Type.STRING, description: "E.g. 'Scripts', 'Styles', 'Images', 'HTML', 'Fonts', 'Other'" },
-                size: { type: Type.STRING, description: "E.g. '1.1 MB'" },
-                percentage: { type: Type.INTEGER },
-                color: { type: Type.STRING, description: "Tailwind background color class, e.g., bg-amber-500, bg-sky-500, bg-rose-500, bg-emerald-500" }
-              },
-              required: ["label", "size", "percentage", "color"]
-            }
-          },
-          opportunities: {
-            type: Type.ARRAY,
-            items: {
+  try {
+    const deviceReportSchema = {
+      type: Type.OBJECT,
+      properties: {
+        performanceScore: { type: Type.INTEGER, description: "Performance score out of 100" },
+        accessibilityScore: { type: Type.INTEGER, description: "Accessibility score out of 100" },
+        bestPracticesScore: { type: Type.INTEGER, description: "Best practices score out of 100" },
+        seoScore: { type: Type.INTEGER, description: "SEO score out of 100" },
+        metrics: {
+          type: Type.OBJECT,
+          properties: {
+            fcp: {
               type: Type.OBJECT,
               properties: {
                 id: { type: Type.STRING },
-                title: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
                 description: { type: Type.STRING },
-                impact: { type: Type.STRING },
-                savings: { type: Type.STRING },
-                category: { type: Type.STRING },
-                codeSnippet: { type: Type.STRING },
-                whyItMatters: { type: Type.STRING }
+                rating: { type: Type.STRING },
               },
-              required: ["id", "title", "description", "impact", "savings", "category", "whyItMatters"]
+              required: ["id", "name", "value", "score", "description", "rating"]
+            },
+            lcp: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
+                description: { type: Type.STRING },
+                rating: { type: Type.STRING },
+              },
+              required: ["id", "name", "value", "score", "description", "rating"]
+            },
+            cls: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
+                description: { type: Type.STRING },
+                rating: { type: Type.STRING },
+              },
+              required: ["id", "name", "value", "score", "description", "rating"]
+            },
+            tbt: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
+                description: { type: Type.STRING },
+                rating: { type: Type.STRING },
+              },
+              required: ["id", "name", "value", "score", "description", "rating"]
+            },
+            speedIndex: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
+                description: { type: Type.STRING },
+                rating: { type: Type.STRING },
+              },
+              required: ["id", "name", "value", "score", "description", "rating"]
+            },
+            interactive: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING },
+                value: { type: Type.STRING },
+                score: { type: Type.INTEGER },
+                description: { type: Type.STRING },
+                rating: { type: Type.STRING },
+              },
+              required: ["id", "name", "value", "score", "description", "rating"]
             }
           },
-          aiExecutiveSummary: { type: Type.STRING }
+          required: ["fcp", "lcp", "cls", "tbt", "speedIndex", "interactive"]
         },
-        required: ["performanceScore", "accessibilityScore", "bestPracticesScore", "seoScore", "metrics", "resources", "opportunities", "aiExecutiveSummary"]
-      };
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
+        resources: {
+          type: Type.ARRAY,
+          items: {
             type: Type.OBJECT,
             properties: {
-              mobile: deviceReportSchema,
-              desktop: deviceReportSchema
+              label: { type: Type.STRING, description: "E.g. 'Scripts', 'Styles', 'Images', 'HTML', 'Fonts', 'Other'" },
+              size: { type: Type.STRING, description: "E.g. '1.1 MB'" },
+              percentage: { type: Type.INTEGER },
+              color: { type: Type.STRING, description: "Tailwind background color class, e.g., bg-amber-500, bg-sky-500, bg-rose-500, bg-emerald-500" }
             },
-            required: ["mobile", "desktop"]
+            required: ["label", "size", "percentage", "color"]
           }
-        }
-      });
+        },
+        opportunities: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              title: { type: Type.STRING },
+              description: { type: Type.STRING },
+              impact: { type: Type.STRING },
+              savings: { type: Type.STRING },
+              category: { type: Type.STRING },
+              codeSnippet: { type: Type.STRING },
+              whyItMatters: { type: Type.STRING }
+            },
+            required: ["id", "title", "description", "impact", "savings", "category", "whyItMatters"]
+          }
+        },
+        aiExecutiveSummary: { type: Type.STRING }
+      },
+      required: ["performanceScore", "accessibilityScore", "bestPracticesScore", "seoScore", "metrics", "resources", "opportunities", "aiExecutiveSummary"]
+    };
 
-      const responseText = response.text || "{}";
-      const finalReport = JSON.parse(responseText.trim());
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            mobile: deviceReportSchema,
+            desktop: deviceReportSchema
+          },
+          required: ["mobile", "desktop"]
+        }
+      }
+    });
+
+    const responseText = response.text || "{}";
+    const finalReport = JSON.parse(responseText.trim());
+
+    // Append url and analyzed timestamp
+    const completeReport = {
+      url,
+      analyzedAt: new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      }) + " UTC",
+      ...finalReport
+    };
+
+    return res.status(200).json(completeReport);
+  } catch (apiError: any) {
+    console.warn("AI report generation failed. Instantiating fallback performance report generator:", apiError.message || apiError);
+    try {
+      const fallbackReport = generateFallbackReport(url, lang, psiData, {
+        htmlLength,
+        serverResponseTime,
+        imagesCount,
+        missingAltCount,
+        scriptsCount,
+        stylesheetsCount,
+        inlineStylesCount,
+        metaTitle,
+        metaDescription
+      });
 
       // Append url and analyzed timestamp
       const completeReport = {
@@ -388,65 +425,15 @@ Your output MUST be valid JSON matching the schema format completely, containing
           minute: "2-digit",
           second: "2-digit"
         }) + " UTC",
-        ...finalReport
+        ...fallbackReport
       };
 
-      res.json(completeReport);
-    } catch (apiError: any) {
-      console.warn("AI report generation failed. Instantiating fallback performance report generator:", apiError.message || apiError);
-      try {
-        const fallbackReport = generateFallbackReport(url, lang, psiData, {
-          htmlLength,
-          serverResponseTime,
-          imagesCount,
-          missingAltCount,
-          scriptsCount,
-          stylesheetsCount,
-          inlineStylesCount,
-          metaTitle,
-          metaDescription
-        });
-
-        // Append url and analyzed timestamp
-        const completeReport = {
-          url,
-          analyzedAt: new Date().toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-          }) + " UTC",
-          ...fallbackReport
-        };
-
-        res.json(completeReport);
-      } catch (innerError: any) {
-        console.error("Critical: Fallback report generation helper failed too:", innerError);
-        res.status(500).json({ error: "Failed to generate AI performance report. Please try again." });
-      }
+      return res.status(200).json(completeReport);
+    } catch (innerError: any) {
+      console.error("Critical: Fallback report generation helper failed too:", innerError);
+      return res.status(500).json({ error: "Failed to generate AI performance report. Please try again." });
     }
-  });
-
-  // Serve static assets out of /dist when in production, otherwise mount Vite in development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Web Performance Analyzer Server booted successfully on running port: ${PORT}`);
-  });
 }
 
 // ==========================================
@@ -737,7 +724,7 @@ function generateFallbackReport(url: string, lang: string, psiData: any, scraper
           impact: "Medium" as const,
           savings: scale,
           category: "accessibility" as const,
-          whyItMatters: "Inklyuziv qoidalarni joriy qilish barcha turdagi foydalanuvchilar qamrovini kengaytiradi hamda qidiruv tizimlariga rasmlarni mos indekslashiga ko'mak beradi.",
+          whyItMatters: "Inklyuziv qoidalarni joriy qilish balla turdagi foydalanuvchilar qamrovini kengaytiradi hamda qidiruv tizimlariga rasmlarni mos indekslashiga ko'mak beradi.",
           codeSnippet: `// To'g'ri alt atributiga ega rasm teglari:\n<img \n  src="/media/hero-stats.webp" \n  alt="Line grafik diagramma: PulseAI tahlil reytingi ko'rsatgichi" \n  loading="lazy" \n  className="rounded-xl shadow-lg"\n/>`
         },
         {
@@ -890,5 +877,3 @@ function generateFallbackReport(url: string, lang: string, psiData: any, scraper
     }
   };
 }
-
-startServer();
