@@ -85,6 +85,9 @@ https://pulse-ai-analyzer.vercel.app
 ```bash
 git clone https://github.com/tulkinovdev/pulse-analyzer.git
 ```
+
+---
+
 ```bash
 cd pulse-analyzer
 ```
